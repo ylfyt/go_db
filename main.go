@@ -18,11 +18,11 @@ func main() {
 		panic(err)
 	}
 
-	var product *int64
-	err = db.Fetch(&product, `SELECT id FROM products WHERE id = 10`)
+	var product []Product
+	err = db.Fetch(&product, `SELECT id FROM products`)
 	if err != nil {
 		panic(err)
 	}
-
 	fmt.Println("Data:", product)
+
 }
