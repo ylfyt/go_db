@@ -5,10 +5,10 @@ import (
 )
 
 type Product struct {
-	Id     int    `col:"id"`
-	Name   string `col:"name"`
-	Desc   string `col:"description"`
-	UserId int    `col:"user_id"`
+	Id          int
+	Name        string
+	Description string
+	UserId      int
 }
 
 func main() {
@@ -19,10 +19,9 @@ func main() {
 	}
 
 	var product []Product
-	err = db.Fetch(&product, `SELECT id FROM products`)
+	err = db.Fetch(&product, `SELECT * FROM products`)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("Data:", product)
-
+	fmt.Printf("Data: %+v\n", product)
 }

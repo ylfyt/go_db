@@ -1,12 +1,30 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"fmt"
 	"reflect"
 	"strings"
 	"time"
+	"unicode"
 )
+
+func CamelToSnake(camel string) string {
+	var buf bytes.Buffer
+	for i, char := range camel {
+		if unicode.IsUpper(char) {
+			if i > 0 {
+				buf.WriteRune('_')
+			}
+			buf.WriteRune(unicode.ToLower(char))
+		} else {
+			buf.WriteRune(char)
+		}
+	}
+
+	return buf.String()
+}
 
 func getTypeRef(val any) typeRef {
 	switch val.(type) {
@@ -50,6 +68,9 @@ func getFieldTypeMap(refType reflect.Type) []typeRef {
 	ref := reflect.New(refType).Elem()
 	refTypes := make([]typeRef, ref.NumField())
 	for i := 0; i < ref.NumField(); i++ {
+		if !ref.Field(i).CanInterface() {
+			continue
+		}
 		refTypes[i] = getTypeRef(ref.Field(i).Interface())
 	}
 
@@ -92,9 +113,15 @@ func getFieldIdxMap(columns []*sql.ColumnType, ref reflect.Type) []int {
 	fields := map[string]int{}
 	for i := 0; i < ref.NumField(); i++ {
 		field := ref.Field(i)
+		if !field.IsExported() {
+			continue
+		}
 		columnName := field.Tag.Get("col")
 		if columnName == "" {
 			columnName = strings.Split(field.Tag.Get("json"), ",")[0]
+		}
+		if columnName == "" {
+			columnName = CamelToSnake(field.Name)
 		}
 		if columnName == "" {
 			continue
