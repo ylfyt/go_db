@@ -71,21 +71,14 @@ func fetchSlice(out any, conn *sql.DB, query string, params ...any) error {
 	columnTypeMap := getColumnTypeMap(columns)
 
 	outValue := reflect.ValueOf(out).Elem()
-
 	for rows.Next() {
-		err := rows.Scan(scansPtr...)
-		if err != nil {
-			return err
-		}
-
-		refVal := reflect.New(elemType)
-		err = parseRow(scans, fieldIdxMap, refVal, fieldTypeMap, columnTypeMap, columns)
+		refVal, err := rowScan(rows, scansPtr, scans, elemType, fieldIdxMap, fieldTypeMap, columnTypeMap, columns)
 		if err != nil {
 			return err
 		}
 
 		if isPointer {
-			newOut := reflect.Append(outValue, refVal)
+			newOut := reflect.Append(outValue, *refVal)
 			outValue.Set(newOut)
 		} else {
 			newOut := reflect.Append(outValue, refVal.Elem())
@@ -94,6 +87,20 @@ func fetchSlice(out any, conn *sql.DB, query string, params ...any) error {
 	}
 
 	return nil
+}
+
+func rowScan(rows *sql.Rows, scansPtr []any, scans []any, elemType reflect.Type, fieldIdxMap []int, fieldTypeMap []typeRef, columnTypeMap []typeRef, columns []*sql.ColumnType) (*reflect.Value, error) {
+	err := rows.Scan(scansPtr...)
+	if err != nil {
+		return nil, err
+	}
+
+	refVal := reflect.New(elemType)
+	err = parseRow(scans, fieldIdxMap, refVal, fieldTypeMap, columnTypeMap, columns)
+	if err != nil {
+		return nil, err
+	}
+	return &refVal, nil
 }
 
 func fetchStruct(out any, conn *sql.DB, query string, params ...any) error {
@@ -139,18 +146,12 @@ func fetchStruct(out any, conn *sql.DB, query string, params ...any) error {
 
 	outValue := reflect.ValueOf(out).Elem()
 	if rows.Next() {
-		err := rows.Scan(scansPtr...)
-		if err != nil {
-			return err
-		}
-
-		refVal := reflect.New(elemType)
-		err = parseRow(scans, fieldIdxMap, refVal, fieldTypeMap, columnTypeMap, columns)
+		refVal, err := rowScan(rows, scansPtr, scans, elemType, fieldIdxMap, fieldTypeMap, columnTypeMap, columns)
 		if err != nil {
 			return err
 		}
 		if isPointer {
-			outValue.Set(refVal)
+			outValue.Set(*refVal)
 		} else {
 			outValue.Set(refVal.Elem())
 		}

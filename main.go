@@ -42,6 +42,6 @@ func main() {
 	}
 	conn = connTmp
 
-	// testSlice()
-	testStruct()
+	testSlice()
+	// testStruct()
 }
