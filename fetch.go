@@ -1,11 +1,17 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"reflect"
 )
 
-func (me *DB) Fetch(out any, query string, args ...any) error {
+type queryable interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+func fetch(conn queryable, out any, query string, args ...any) error {
 	outRef := reflect.TypeOf(out)
 	if outRef.Kind() != reflect.Pointer {
 		return fmt.Errorf("output must be pointer")
@@ -15,43 +21,43 @@ func (me *DB) Fetch(out any, query string, args ...any) error {
 	if isSlice {
 		if outRef.Elem().Elem().Kind() == reflect.Pointer {
 			if isPrimitiveType(outRef.Elem().Elem().Elem()) {
-				return me.fetchColumn(!isSlice, out, query, args...)
+				return fetchColumn(conn, !isSlice, out, query, args...)
 			}
-			return me.fetch(!isSlice, out, query, args...)
+			return fetchWrapper(conn, !isSlice, out, query, args...)
 		}
 		if isPrimitiveType(outRef.Elem().Elem()) {
-			return me.fetchColumn(!isSlice, out, query, args...)
+			return fetchColumn(conn, !isSlice, out, query, args...)
 		}
-		return me.fetch(!isSlice, out, query, args...)
+		return fetchWrapper(conn, !isSlice, out, query, args...)
 	}
 
 	if outRef.Elem().Kind() == reflect.Pointer {
 		if isPrimitiveType(outRef.Elem().Elem()) {
-			return me.fetchColumn(!isSlice, out, query, args...)
+			return fetchColumn(conn, !isSlice, out, query, args...)
 		}
-		return me.fetch(!isSlice, out, query, args...)
+		return fetchWrapper(conn, !isSlice, out, query, args...)
 	}
 	if isPrimitiveType(outRef.Elem()) {
-		return me.fetchColumn(!isSlice, out, query, args...)
+		return fetchColumn(conn, !isSlice, out, query, args...)
 	}
-	return me.fetch(!isSlice, out, query, args...)
+	return fetchWrapper(conn, !isSlice, out, query, args...)
 }
 
-func (me *DB) fetch(onlyOne bool, out any, query string, args ...any) error {
+func fetchWrapper(conn queryable, onlyOne bool, out any, query string, args ...any) error {
 	if onlyOne {
-		return me.fetchStruct(out, query, args...)
+		return fetchStruct(conn, out, query, args...)
 	}
-	return me.fetchSlice(out, query, args...)
+	return fetchSlice(conn, out, query, args...)
 }
 
-func (me *DB) fetchColumn(onlyOne bool, out any, query string, args ...any) error {
+func fetchColumn(conn queryable, onlyOne bool, out any, query string, args ...any) error {
 	if onlyOne {
-		return me.fetchColumnOne(out, query, args...)
+		return fetchColumnOne(conn, out, query, args...)
 	}
-	return me.fetchColumns(out, query, args...)
+	return fetchColumns(conn, out, query, args...)
 }
 
-func (me *DB) fetchSlice(out any, query string, args ...any) error {
+func fetchSlice(conn queryable, out any, query string, args ...any) error {
 	outType := reflect.TypeOf(out)
 	isPointer := false
 	sliceType := outType.Elem()
@@ -69,7 +75,7 @@ func (me *DB) fetchSlice(out any, query string, args ...any) error {
 		elemType = sliceType.Elem()
 	}
 
-	rows, err := me.conn.Query(query, args...)
+	rows, err := conn.Query(query, args...)
 	if err != nil {
 		return err
 	}
@@ -108,7 +114,7 @@ func (me *DB) fetchSlice(out any, query string, args ...any) error {
 	return nil
 }
 
-func (me *DB) fetchStruct(out any, query string, args ...any) error {
+func fetchStruct(conn queryable, out any, query string, args ...any) error {
 	outType := reflect.TypeOf(out)
 
 	isPointer := false
@@ -129,7 +135,7 @@ func (me *DB) fetchStruct(out any, query string, args ...any) error {
 		elemType = outType.Elem()
 	}
 
-	rows, err := me.conn.Query(query, args...)
+	rows, err := conn.Query(query, args...)
 	if err != nil {
 		return err
 	}
@@ -165,7 +171,7 @@ func (me *DB) fetchStruct(out any, query string, args ...any) error {
 	return nil
 }
 
-func (me *DB) fetchColumns(out any, query string, args ...any) error {
+func fetchColumns(conn queryable, out any, query string, args ...any) error {
 	outType := reflect.TypeOf(out)
 	isPointer := false
 	sliceType := outType.Elem()
@@ -183,7 +189,7 @@ func (me *DB) fetchColumns(out any, query string, args ...any) error {
 		elemType = sliceType.Elem()
 	}
 
-	rows, err := me.conn.Query(query, args...)
+	rows, err := conn.Query(query, args...)
 	if err != nil {
 		return err
 	}
@@ -222,7 +228,7 @@ func (me *DB) fetchColumns(out any, query string, args ...any) error {
 	return nil
 }
 
-func (me *DB) fetchColumnOne(out any, query string, args ...any) error {
+func fetchColumnOne(conn queryable, out any, query string, args ...any) error {
 	outType := reflect.TypeOf(out)
 
 	isPointer := false
@@ -243,7 +249,7 @@ func (me *DB) fetchColumnOne(out any, query string, args ...any) error {
 		elemType = outType.Elem()
 	}
 
-	rows, err := me.conn.Query(query, args...)
+	rows, err := conn.Query(query, args...)
 	if err != nil {
 		return err
 	}

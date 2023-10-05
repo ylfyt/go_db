@@ -10,7 +10,7 @@ import (
 	"unicode"
 )
 
-func CamelToSnake(camel string) string {
+func camelToSnake(camel string) string {
 	var buf bytes.Buffer
 	for i, char := range camel {
 		if unicode.IsUpper(char) {
@@ -121,7 +121,7 @@ func getFieldIdxMap(columns []*sql.ColumnType, ref reflect.Type) []int {
 			columnName = strings.Split(field.Tag.Get("json"), ",")[0]
 		}
 		if columnName == "" {
-			columnName = CamelToSnake(field.Name)
+			columnName = camelToSnake(field.Name)
 		}
 		if columnName == "" {
 			continue
