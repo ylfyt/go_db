@@ -13,12 +13,16 @@ type Product struct {
 
 func main() {
 	connStr := "postgresql://postgres:postgres@localhost/coba?sslmode=disable"
-	db, err := New(connStr, nil)
+	db, err := New(connStr, Option{
+		MaxOpenConn: 10,
+		MaxIdleConn: 1,
+		MaxConnLifeTime: 5,
+	})
 	if err != nil {
 		panic(err)
 	}
 
-	var product []Product
+	var product Product
 	err = db.Fetch(&product, `SELECT * FROM products`)
 	if err != nil {
 		panic(err)
