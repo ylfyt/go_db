@@ -23,11 +23,11 @@ func parseRow(scans []any, fieldIdxMap []int, refValue reflect.Value, fieldTypeM
 	return nil
 }
 
-func fetchSlice(out any, onlyOneRow bool, conn *sql.DB, query string, params ...any) error {
+func fetchSlice(out any, conn *sql.DB, query string, params ...any) error {
 	outType := reflect.TypeOf(out)
 
 	if outType.Kind() != reflect.Pointer {
-		return fmt.Errorf("out should be pointer to slice")
+		return fmt.Errorf("out should be pointer")
 	}
 
 	if outType.Elem().Kind() != reflect.Slice {
@@ -43,9 +43,10 @@ func fetchSlice(out any, onlyOneRow bool, conn *sql.DB, query string, params ...
 		}
 		isPointer = true
 		elemType = sliceType.Elem().Elem()
-	} else if sliceType.Elem().Kind() != reflect.Struct {
-		return fmt.Errorf("element must be struct")
 	} else {
+		if sliceType.Elem().Kind() != reflect.Struct {
+			return fmt.Errorf("element must be struct")
+		}
 		elemType = sliceType.Elem()
 	}
 
@@ -58,10 +59,9 @@ func fetchSlice(out any, onlyOneRow bool, conn *sql.DB, query string, params ...
 	if err != nil {
 		return err
 	}
-	numOfColumns := len(columns)
 
-	scans := make([]any, numOfColumns)
-	scansPtr := make([]any, numOfColumns)
+	scans := make([]any, len(columns))
+	scansPtr := make([]any, len(columns))
 	for i := range scans {
 		scansPtr[i] = &scans[i]
 	}
@@ -91,12 +91,73 @@ func fetchSlice(out any, onlyOneRow bool, conn *sql.DB, query string, params ...
 			newOut := reflect.Append(outValue, refVal.Elem())
 			outValue.Set(newOut)
 		}
-
 	}
 
 	return nil
 }
 
+func fetchStruct(out any, conn *sql.DB, query string, params ...any) error {
+	outType := reflect.TypeOf(out)
+	isPointer := false
+	if outType.Kind() != reflect.Pointer {
+		return fmt.Errorf("out must be pointer")
+	}
+	var elemType reflect.Type
+	if outType.Elem().Kind() == reflect.Pointer {
+		if outType.Elem().Elem().Kind() != reflect.Struct {
+			return fmt.Errorf("out must be struct")
+		}
+		elemType = outType.Elem().Elem()
+		isPointer = true
+	} else {
+		if outType.Elem().Kind() != reflect.Struct {
+			return fmt.Errorf("out must be struct")
+		}
+		if reflect.ValueOf(out).IsNil() {
+			return fmt.Errorf("out cannot be nil")
+		}
+		elemType = outType.Elem()
+	}
+
+	rows, err := conn.Query(query, params...)
+	if err != nil {
+		return err
+	}
+	columns, err := rows.ColumnTypes()
+	if err != nil {
+		return err
+	}
+	scans := make([]any, len(columns))
+	scansPtr := make([]any, len(columns))
+	for i := range scans {
+		scansPtr[i] = &scans[i]
+	}
+
+	fieldIdxMap := getFieldIdxMap(columns, elemType)
+	fieldTypeMap := getFieldTypeMap(elemType)
+	columnTypeMap := getColumnTypeMap(columns)
+
+	outValue := reflect.ValueOf(out).Elem()
+	if rows.Next() {
+		err := rows.Scan(scansPtr...)
+		if err != nil {
+			return err
+		}
+
+		refVal := reflect.New(elemType)
+		err = parseRow(scans, fieldIdxMap, refVal, fieldTypeMap, columnTypeMap, columns)
+		if err != nil {
+			return err
+		}
+		if isPointer {
+			outValue.Set(refVal)
+		} else {
+			outValue.Set(refVal.Elem())
+		}
+	}
+	return nil
+}
+
 func Fetch(out any, conn *sql.DB, query string, params ...any) error {
-	return fetchSlice(out, false, conn, query, params...)
+	return fetchSlice(out, conn, query, params...)
 }

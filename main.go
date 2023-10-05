@@ -14,22 +14,34 @@ type Product struct {
 	UserId int    `col:"user_id"`
 }
 
+var conn *sql.DB
+
+func testSlice() {
+	var products []Product
+	err := fetchSlice(&products, conn, "SELECT * FROM products LIMIT 2")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Data: %+v\n", products)
+}
+
+func testStruct() {
+	var products *Product
+	err := fetchStruct(&products, conn, "SELECT * FROM products LIMIT 1")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Data: %+v\n", products)
+}
+
 func main() {
 	connStr := "postgresql://postgres:postgres@localhost/coba?sslmode=disable"
-	conn, err := sql.Open("postgres", connStr)
+	connTmp, err := sql.Open("postgres", connStr)
 	if err != nil {
 		panic(err)
 	}
+	conn = connTmp
 
-	var products []Product
-	err = fetchSlice(&products, false, conn, "SELECT * FROM products LIMIT 2")
-	if err != nil {
-		panic(err)
-	}
-
-	// err = db.Fetch(&products)
-	// if err != nil {
-	// 	panic(err)
-	// }
-	fmt.Printf("Data: %+v\n", products)
+	// testSlice()
+	testStruct()
 }
