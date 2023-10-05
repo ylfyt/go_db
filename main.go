@@ -18,7 +18,7 @@ var conn *sql.DB
 
 func testSlice() {
 	var products []Product
-	err := fetchSlice(&products, conn, "SELECT * FROM products LIMIT 2")
+	err := Fetch(&products, conn, "SELECT * FROM products LIMIT 2")
 	if err != nil {
 		panic(err)
 	}

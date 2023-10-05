@@ -25,17 +25,9 @@ func parseRow(scans []any, fieldIdxMap []int, refValue reflect.Value, fieldTypeM
 
 func fetchSlice(out any, conn *sql.DB, query string, params ...any) error {
 	outType := reflect.TypeOf(out)
-
-	if outType.Kind() != reflect.Pointer {
-		return fmt.Errorf("out should be pointer")
-	}
-
-	if outType.Elem().Kind() != reflect.Slice {
-		return fmt.Errorf("out should be slice")
-	}
-
-	sliceType := outType.Elem()
+	
 	isPointer := false
+	sliceType := outType.Elem()
 	var elemType reflect.Type
 	if sliceType.Elem().Kind() == reflect.Pointer {
 		if sliceType.Elem().Elem().Kind() != reflect.Struct {
@@ -105,10 +97,8 @@ func rowScan(rows *sql.Rows, scansPtr []any, scans []any, elemType reflect.Type,
 
 func fetchStruct(out any, conn *sql.DB, query string, params ...any) error {
 	outType := reflect.TypeOf(out)
+
 	isPointer := false
-	if outType.Kind() != reflect.Pointer {
-		return fmt.Errorf("out must be pointer")
-	}
 	var elemType reflect.Type
 	if outType.Elem().Kind() == reflect.Pointer {
 		if outType.Elem().Elem().Kind() != reflect.Struct {
@@ -160,5 +150,14 @@ func fetchStruct(out any, conn *sql.DB, query string, params ...any) error {
 }
 
 func Fetch(out any, conn *sql.DB, query string, params ...any) error {
-	return fetchSlice(out, conn, query, params...)
+	outRef := reflect.TypeOf(out)
+	if outRef.Kind() != reflect.Pointer {
+		return fmt.Errorf("output must be pointer")
+	}
+
+	if outRef.Elem().Kind() == reflect.Slice {
+		return fetchSlice(out, conn, query, params...)
+	}
+
+	return fetchStruct(out, conn, query, params...)
 }
