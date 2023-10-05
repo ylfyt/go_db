@@ -45,8 +45,8 @@ func getTypeRef(val any) typeRef {
 	return type_UNKNOWN
 }
 
-func getFieldTypeMap(ref reflect.Value) []typeRef {
-	ref = ref.Elem()
+func getFieldTypeMap(refType reflect.Type) []typeRef {
+	ref := reflect.New(refType).Elem()
 	refTypes := make([]typeRef, ref.NumField())
 	for i := 0; i < ref.NumField(); i++ {
 		refTypes[i] = getTypeRef(ref.Field(i).Interface())
