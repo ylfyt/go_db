@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"reflect"
 	"strings"
 	"time"
@@ -112,4 +113,47 @@ func getFieldIdxMap(columns []*sql.ColumnType, ref reflect.Type) []int {
 	}
 
 	return fieldMap
+}
+
+func parseRow(scans []any, fieldIdxMap []int, refValue reflect.Value, fieldTypeMap []typeRef, columnTypeMap []typeRef, columns []*sql.ColumnType) error {
+	for i := range scans {
+		idx := fieldIdxMap[i]
+		if idx == -1 {
+			continue
+		}
+
+		field := refValue.Elem().Field(idx)
+		fieldType := fieldTypeMap[idx]
+		err := setValue(field, fieldType, scans[i], columnTypeMap[i])
+		if err != nil {
+			return fmt.Errorf("%s (col:%s)", err.Error(), columns[i].Name())
+		}
+	}
+	return nil
+}
+
+func rowScan(rows *sql.Rows, scansPtr []any, scans []any, elemType reflect.Type, fieldIdxMap []int, fieldTypeMap []typeRef, columnTypeMap []typeRef, columns []*sql.ColumnType) (*reflect.Value, error) {
+	err := rows.Scan(scansPtr...)
+	if err != nil {
+		return nil, err
+	}
+
+	refVal := reflect.New(elemType)
+	err = parseRow(scans, fieldIdxMap, refVal, fieldTypeMap, columnTypeMap, columns)
+	if err != nil {
+		return nil, err
+	}
+	return &refVal, nil
+}
+
+func isPrimitiveType(typ reflect.Type) bool {
+	switch typ.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64,
+		reflect.String:
+		return true
+	default:
+		return false
+	}
 }

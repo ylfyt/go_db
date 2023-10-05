@@ -1,31 +1,58 @@
 package main
 
 import (
-	"database/sql"
 	"fmt"
 	"reflect"
 )
 
-func parseRow(scans []any, fieldIdxMap []int, refValue reflect.Value, fieldTypeMap []typeRef, columnTypeMap []typeRef, columns []*sql.ColumnType) error {
-	for i := range scans {
-		idx := fieldIdxMap[i]
-		if idx == -1 {
-			continue
-		}
-
-		field := refValue.Elem().Field(idx)
-		fieldType := fieldTypeMap[idx]
-		err := setValue(field, fieldType, scans[i], columnTypeMap[i])
-		if err != nil {
-			return fmt.Errorf("%s (col:%s)", err.Error(), columns[i].Name())
-		}
+func (me *DB) Fetch(out any, query string, params ...any) error {
+	outRef := reflect.TypeOf(out)
+	if outRef.Kind() != reflect.Pointer {
+		return fmt.Errorf("output must be pointer")
 	}
-	return nil
+	isSlice := outRef.Elem().Kind() == reflect.Slice
+
+	if isSlice {
+		if outRef.Elem().Elem().Kind() == reflect.Pointer {
+			if isPrimitiveType(outRef.Elem().Elem().Elem()) {
+				return me.fetchColumn(!isSlice, out, query, params...)
+			}
+			return me.fetch(!isSlice, out, query, params...)
+		}
+		if isPrimitiveType(outRef.Elem().Elem()) {
+			return me.fetchColumn(!isSlice, out, query, params...)
+		}
+		return me.fetch(!isSlice, out, query, params...)
+	}
+
+	if outRef.Elem().Kind() == reflect.Pointer {
+		if isPrimitiveType(outRef.Elem().Elem()) {
+			return me.fetchColumn(!isSlice, out, query, params...)
+		}
+		return me.fetch(!isSlice, out, query, params...)
+	}
+	if isPrimitiveType(outRef.Elem()) {
+		return me.fetchColumn(!isSlice, out, query, params...)
+	}
+	return me.fetch(!isSlice, out, query, params...)
 }
 
-func fetchSlice(out any, conn *sql.DB, query string, params ...any) error {
+func (me *DB) fetch(onlyOne bool, out any, query string, params ...any) error {
+	if onlyOne {
+		return me.fetchStruct(out, query, params...)
+	}
+	return me.fetchSlice(out, query, params...)
+}
+
+func (me *DB) fetchColumn(onlyOne bool, out any, query string, params ...any) error {
+	if onlyOne {
+		return me.fetchColumnOne(out, query, params...)
+	}
+	return me.fetchColumns(out, query, params...)
+}
+
+func (me *DB) fetchSlice(out any, query string, params ...any) error {
 	outType := reflect.TypeOf(out)
-	
 	isPointer := false
 	sliceType := outType.Elem()
 	var elemType reflect.Type
@@ -42,7 +69,7 @@ func fetchSlice(out any, conn *sql.DB, query string, params ...any) error {
 		elemType = sliceType.Elem()
 	}
 
-	rows, err := conn.Query(query, params...)
+	rows, err := me.conn.Query(query, params...)
 	if err != nil {
 		return err
 	}
@@ -81,21 +108,7 @@ func fetchSlice(out any, conn *sql.DB, query string, params ...any) error {
 	return nil
 }
 
-func rowScan(rows *sql.Rows, scansPtr []any, scans []any, elemType reflect.Type, fieldIdxMap []int, fieldTypeMap []typeRef, columnTypeMap []typeRef, columns []*sql.ColumnType) (*reflect.Value, error) {
-	err := rows.Scan(scansPtr...)
-	if err != nil {
-		return nil, err
-	}
-
-	refVal := reflect.New(elemType)
-	err = parseRow(scans, fieldIdxMap, refVal, fieldTypeMap, columnTypeMap, columns)
-	if err != nil {
-		return nil, err
-	}
-	return &refVal, nil
-}
-
-func fetchStruct(out any, conn *sql.DB, query string, params ...any) error {
+func (me *DB) fetchStruct(out any, query string, params ...any) error {
 	outType := reflect.TypeOf(out)
 
 	isPointer := false
@@ -116,14 +129,18 @@ func fetchStruct(out any, conn *sql.DB, query string, params ...any) error {
 		elemType = outType.Elem()
 	}
 
-	rows, err := conn.Query(query, params...)
+	rows, err := me.conn.Query(query, params...)
 	if err != nil {
 		return err
+	}
+	if !rows.Next() {
+		return nil
 	}
 	columns, err := rows.ColumnTypes()
 	if err != nil {
 		return err
 	}
+
 	scans := make([]any, len(columns))
 	scansPtr := make([]any, len(columns))
 	for i := range scans {
@@ -133,31 +150,131 @@ func fetchStruct(out any, conn *sql.DB, query string, params ...any) error {
 	fieldIdxMap := getFieldIdxMap(columns, elemType)
 	fieldTypeMap := getFieldTypeMap(elemType)
 	columnTypeMap := getColumnTypeMap(columns)
+	refVal, err := rowScan(rows, scansPtr, scans, elemType, fieldIdxMap, fieldTypeMap, columnTypeMap, columns)
+	if err != nil {
+		return err
+	}
 
 	outValue := reflect.ValueOf(out).Elem()
-	if rows.Next() {
-		refVal, err := rowScan(rows, scansPtr, scans, elemType, fieldIdxMap, fieldTypeMap, columnTypeMap, columns)
+	if isPointer {
+		outValue.Set(*refVal)
+	} else {
+		outValue.Set(refVal.Elem())
+	}
+
+	return nil
+}
+
+func (me *DB) fetchColumns(out any, query string, params ...any) error {
+	outType := reflect.TypeOf(out)
+	isPointer := false
+	sliceType := outType.Elem()
+	var elemType reflect.Type
+	if sliceType.Elem().Kind() == reflect.Pointer {
+		if !isPrimitiveType(sliceType.Elem().Elem()) {
+			return fmt.Errorf("element must be primitive type")
+		}
+		isPointer = true
+		elemType = sliceType.Elem().Elem()
+	} else {
+		if !isPrimitiveType(sliceType.Elem()) {
+			return fmt.Errorf("element must be primitive type")
+		}
+		elemType = sliceType.Elem()
+	}
+
+	rows, err := me.conn.Query(query, params...)
+	if err != nil {
+		return err
+	}
+	columns, err := rows.ColumnTypes()
+	if err != nil {
+		return err
+	}
+	if len(columns) == 0 {
+		return fmt.Errorf("there is no column in query")
+	}
+
+	temp := reflect.New(elemType)
+	tempTypeRef := getTypeRef(temp.Elem().Interface())
+	columnTypeMap := getColumnTypeMap(columns)
+
+	var scan any
+	outValue := reflect.ValueOf(out).Elem()
+	for rows.Next() {
+		err = rows.Scan(&scan)
+		if err != nil {
+			return err
+		}
+		err = setValue(temp.Elem(), tempTypeRef, scan, columnTypeMap[0])
 		if err != nil {
 			return err
 		}
 		if isPointer {
-			outValue.Set(*refVal)
+			newOut := reflect.Append(outValue, temp)
+			outValue.Set(newOut)
 		} else {
-			outValue.Set(refVal.Elem())
+			newOut := reflect.Append(outValue, temp.Elem())
+			outValue.Set(newOut)
 		}
 	}
+
 	return nil
 }
 
-func Fetch(out any, conn *sql.DB, query string, params ...any) error {
-	outRef := reflect.TypeOf(out)
-	if outRef.Kind() != reflect.Pointer {
-		return fmt.Errorf("output must be pointer")
+func (me *DB) fetchColumnOne(out any, query string, params ...any) error {
+	outType := reflect.TypeOf(out)
+
+	isPointer := false
+	var elemType reflect.Type
+	if outType.Elem().Kind() == reflect.Pointer {
+		if !isPrimitiveType(outType.Elem().Elem()) {
+			return fmt.Errorf("element must be primitive type")
+		}
+		elemType = outType.Elem().Elem()
+		isPointer = true
+	} else {
+		if !isPrimitiveType(outType.Elem()) {
+			return fmt.Errorf("element must be primitive type")
+		}
+		if reflect.ValueOf(out).IsNil() {
+			return fmt.Errorf("out cannot be nil")
+		}
+		elemType = outType.Elem()
 	}
 
-	if outRef.Elem().Kind() == reflect.Slice {
-		return fetchSlice(out, conn, query, params...)
+	rows, err := me.conn.Query(query, params...)
+	if err != nil {
+		return err
+	}
+	if !rows.Next() {
+		return nil
+	}
+	var scan any
+	err = rows.Scan(&scan)
+	if err != nil {
+		return err
 	}
 
-	return fetchStruct(out, conn, query, params...)
+	columns, err := rows.ColumnTypes()
+	if err != nil {
+		return err
+	}
+	columnTypeMap := getColumnTypeMap(columns)
+
+	temp := reflect.New(elemType)
+
+	err = setValue(temp.Elem(), getTypeRef(temp.Elem().Interface()), scan, columnTypeMap[0])
+	if err != nil {
+		return err
+	}
+
+	outValue := reflect.ValueOf(out).Elem()
+	if isPointer {
+		outValue.Set(temp)
+	} else {
+		outValue.Set(temp.Elem())
+	}
+
+	return nil
 }
