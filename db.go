@@ -9,7 +9,7 @@ type DB struct {
 type Option struct {
 	MaxOpenConn     int
 	MaxIdleConn     int
-	MaxConnLifeTime int // in seconds
+	MaxIdleLifeTime int // in seconds
 }
 
 const (

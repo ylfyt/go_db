@@ -29,7 +29,7 @@ func camelToSnake(camel string) string {
 func getTypeRef(val any) typeRef {
 	switch val.(type) {
 	case int:
-		return type_INT32
+		return type_INT
 	case int32:
 		return type_INT32
 	case int64:
@@ -52,8 +52,12 @@ func getTypeRef(val any) typeRef {
 		return type_FLOAT64
 	case map[string]any:
 		return type_MAP_STRING_ANY
+	case map[string]int:
+		return type_MAP_STRING_INT
+	case map[string]string:
+		return type_MAP_STRING_STRING
 	case []int:
-		return type_ARRAY_INT32
+		return type_ARRAY_INT
 	case []int32:
 		return type_ARRAY_INT32
 	case []int64:
@@ -82,15 +86,15 @@ func getColumnTypeMap(columns []*sql.ColumnType) []typeRef {
 	for i, v := range columns {
 		var x typeRef
 		switch v.DatabaseTypeName() {
-		case "_INT4", "_INT8":
+		case "_INT4":
 			x = type_ARRAY_INT
+		case "_INT8":
+			x = type_ARRAY_INT64
 		case "CHAR", "VARCHAR", "NVARCHAR", "TEXT":
 			x = type_STRING
 		case "BOOL":
 			x = type_BOOL
-		case "INT4":
-			x = type_INT64
-		case "INT8":
+		case "INT4", "INT8":
 			x = type_INT64
 		case "FLOAT4":
 			x = type_FLOAT32

@@ -8,6 +8,40 @@ import (
 	"strings"
 )
 
+type mapParseType interface {
+	map[string]int |
+		map[string]int64 |
+		map[string]any |
+		map[string]string |
+		[]map[string]int |
+		[]map[string]int64 |
+		[]map[string]any |
+		[]map[string]string
+}
+
+func parseArray[T any](arrStr any, newValueCreator func(string) T) []T {
+	data := strings.Split(strings.Trim(string(arrStr.([]byte)), "{}"), ",")
+	newArr := []T{}
+	for _, el := range data {
+		if el == "" {
+			continue
+		}
+		newEl := newValueCreator(el)
+		newArr = append(newArr, newEl)
+	}
+	return newArr
+}
+
+func setJsonToMap[T mapParseType](val any, field reflect.Value) error {
+	var tmpVal T
+	err := json.Unmarshal(val.([]byte), &tmpVal)
+	if err != nil {
+		return err
+	}
+	field.Set(reflect.ValueOf(tmpVal))
+	return nil
+}
+
 func setValue(field reflect.Value, fieldType typeRef, val any, columnType typeRef) error {
 	if fieldType == type_UNKNOWN {
 		return fmt.Errorf("unknown type '%s'", field.Type())
@@ -19,6 +53,12 @@ func setValue(field reflect.Value, fieldType typeRef, val any, columnType typeRe
 		field.Set(reflect.New(field.Type()).Elem())
 		return nil
 	}
+	if columnType == type_ARRAY_INT {
+		val = parseArray[int](val, func(s string) int { newEl, _ := strconv.Atoi(s); return newEl })
+	}
+	if columnType == type_ARRAY_INT64 {
+		val = parseArray[int64](val, func(s string) int64 { newEl, _ := strconv.ParseInt(s, 10, 64); return newEl })
+	}
 	if fieldType == columnType {
 		field.Set(reflect.ValueOf(val))
 		return nil
@@ -27,22 +67,16 @@ func setValue(field reflect.Value, fieldType typeRef, val any, columnType typeRe
 	fieldTypeName := field.Type().Name()
 	if columnType == type_JSON {
 		if fieldType == type_MAP_STRING_ANY {
-			var tmpVal map[string]any
-			err := json.Unmarshal(val.([]byte), &tmpVal)
-			if err != nil {
-				return err
-			}
-			field.Set(reflect.ValueOf(tmpVal))
-			return nil
+			return setJsonToMap[map[string]any](val, field)
+		}
+		if fieldType == type_MAP_STRING_INT {
+			return setJsonToMap[map[string]int](val, field)
+		}
+		if fieldType == type_MAP_STRING_STRING {
+			return setJsonToMap[map[string]string](val, field)
 		}
 		if fieldType == type_ARRAY_MAP_STRING_ANY {
-			var tmpVal []map[string]any
-			err := json.Unmarshal(val.([]byte), &tmpVal)
-			if err != nil {
-				return err
-			}
-			field.Set(reflect.ValueOf(tmpVal))
-			return nil
+			return setJsonToMap[[]map[string]string](val, field)
 		}
 		if fieldType == type_STRING {
 			tmpVal := string(val.([]byte))
@@ -51,27 +85,8 @@ func setValue(field reflect.Value, fieldType typeRef, val any, columnType typeRe
 		}
 		return fmt.Errorf("cannot convert db type 'json' to '%s'", field.Type())
 	}
-	if columnType == type_ARRAY_INT {
-		data := strings.Split(strings.Trim(string(val.([]byte)), "{}"), ",")
-		if fieldType == type_ARRAY_INT32 {
-			values := make([]int32, len(data))
-			for i, val := range data {
-				val, _ := strconv.Atoi(val)
-				values[i] = int32(val)
-			}
-			field.Set(reflect.ValueOf(values))
-		} else {
-			values := make([]int64, len(data))
-			for i, val := range data {
-				val, _ := strconv.ParseInt(val, 10, 64)
-				values[i] = val
-			}
-			field.Set(reflect.ValueOf(values))
-		}
-		return nil
-	}
 	if columnType == type_INT64 {
-		if fieldType == type_INT32 {
+		if fieldType == type_INT {
 			field.SetInt(val.(int64))
 			return nil
 		}

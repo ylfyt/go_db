@@ -17,7 +17,7 @@ func New(connStr string, opts ...Option) (*DB, error) {
 		opts = append(opts, Option{
 			MaxOpenConn:     DEFAULT_MAX_OPEN_CONN,
 			MaxIdleConn:     DEFAULT_MAX_IDLE_CONN,
-			MaxConnLifeTime: DEFAULT_MAX_CONN_LIFE_TIME,
+			MaxIdleLifeTime: DEFAULT_MAX_CONN_LIFE_TIME,
 		})
 	}
 
@@ -28,8 +28,8 @@ func New(connStr string, opts ...Option) (*DB, error) {
 	if opt.MaxIdleConn > 0 {
 		conn.SetMaxIdleConns(opt.MaxIdleConn)
 	}
-	if opt.MaxConnLifeTime > 0 {
-		conn.SetConnMaxLifetime(time.Duration(opt.MaxConnLifeTime))
+	if opt.MaxIdleLifeTime > 0 {
+		conn.SetConnMaxIdleTime(time.Duration(opt.MaxIdleLifeTime * int(time.Second)))
 	}
 
 	return &DB{

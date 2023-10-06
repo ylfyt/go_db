@@ -79,6 +79,7 @@ func fetchSlice(conn queryable, out any, query string, args ...any) error {
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 
 	columns, err := rows.ColumnTypes()
 	if err != nil {
@@ -101,7 +102,6 @@ func fetchSlice(conn queryable, out any, query string, args ...any) error {
 		if err != nil {
 			return err
 		}
-
 		if isPointer {
 			newOut := reflect.Append(outValue, *refVal)
 			outValue.Set(newOut)
@@ -110,7 +110,6 @@ func fetchSlice(conn queryable, out any, query string, args ...any) error {
 			outValue.Set(newOut)
 		}
 	}
-
 	return nil
 }
 
@@ -139,6 +138,8 @@ func fetchStruct(conn queryable, out any, query string, args ...any) error {
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
+
 	if !rows.Next() {
 		return nil
 	}
@@ -193,6 +194,8 @@ func fetchColumns(conn queryable, out any, query string, args ...any) error {
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
+	
 	columns, err := rows.ColumnTypes()
 	if err != nil {
 		return err
@@ -253,6 +256,8 @@ func fetchColumnOne(conn queryable, out any, query string, args ...any) error {
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
+
 	columns, err := rows.ColumnTypes()
 	if err != nil {
 		return err
