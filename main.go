@@ -1,85 +1,63 @@
 package main
 
 import (
+	"database/sql"
+	"encoding/json"
 	"fmt"
-	"runtime"
-	"sync"
 	"time"
 )
 
-var db *DB
-
-func test(worker int, wg *sync.WaitGroup) {
-	defer wg.Done()
+func oldMethod(conn *sql.DB) {
 	type Product struct {
-		Id          int
-		StoreId     int
-		Name        string
-		Description string
-		Price       int
-		CreatedAt   time.Time
-		Detail      string
+		Id          string `json:"id"`
+		StoreId     string `json:"store_id"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Price       string `json:"price"`
+		CreatedAt   string `json:"created_at"`
+		Detail      string `json:"detail"`
+	}
+
+	res, err := GetQuery(conn, `SELECT * FROM product`)
+	if err != nil {
+		fmt.Println("Err", err)
 	}
 
 	var products []Product
-	err := db.Fetch(&products, `SELECT * FROM product`)
+	err = json.Unmarshal(res, &products)
 	if err != nil {
-		panic(err)
+		fmt.Println("Err", err)
 	}
-
-	// fmt.Println(worker, ":", len(products))
+	// fmt.Println("Data:", products)
 }
 
-var peek uint64 = 0
-var minMem uint64 = 999999999999
-
-func printMemoryUsage() {
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-
-	fmt.Printf("Allocated memory: %v MB\n", m.Alloc/(1024*1024))
-	if peek < m.Alloc {
-		peek = m.Alloc
+func newMethod(conn *DB) {
+	type Product struct {
+		Id          int64     `json:"id"`
+		StoreId     int64     `json:"store_id"`
+		Name        string    `json:"name"`
+		Description string    `json:"description"`
+		Price       int64     `json:"price"`
+		CreatedAt   time.Time `json:"created_at"`
+		Detail      string    `json:"detail"`
 	}
-	if minMem > m.Alloc {
-		minMem = m.Alloc
+
+	var products []Product
+	err := conn.Fetch(&products, `SELECT * FROM product`)
+	if err != nil {
+		fmt.Println("Err", err)
 	}
-	fmt.Printf("Total memory allocated (including freed): %v bytes\n", m.TotalAlloc)
-	fmt.Printf("System memory used: %v bytes\n", m.Sys)
-	fmt.Printf("Memory currently in use by Go runtime: %v bytes\n", m.Mallocs-m.Frees)
-	fmt.Printf("=============== %d MB | %d MB ==================\n", peek/(1024*1024), minMem/(1024*1024))
+	// fmt.Println("Data:", products)
 }
 
 func main() {
 	connStr := "postgresql://postgres:postgres@localhost/db_product?sslmode=disable"
-	dbTmp, err := New(connStr, Option{
-		MaxOpenConn:     100,
-		MaxIdleConn:     10,
-		MaxIdleLifeTime: 300,
+	conn, err := New(connStr, Option{
+		MaxOpenConn: 100,
 	})
 	if err != nil {
 		panic(err)
 	}
-	db = dbTmp
-
-	go func() {
-		for {
-			printMemoryUsage()
-			time.Sleep(10 * time.Second)
-		}
-	}()
-
-	var wg sync.WaitGroup
-	for i := 0; i < 40000; i++ {
-		wg.Add(1)
-		go test(i, &wg)
-	}
-	wg.Wait()
-	fmt.Println("Done==============")
-
-	func() {
-		for {
-			time.Sleep(10 * time.Second)
-		}
-	}()
+	// oldMethod(conn)
+	newMethod(conn)
 }
