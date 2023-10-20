@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 type mapParseType interface {
@@ -62,6 +64,14 @@ func setValue(field reflect.Value, fieldType typeRef, val any, columnType typeRe
 	if columnType == type_UNKNOWN {
 		return fmt.Errorf("unknown db type")
 	}
+	if columnType == type_UUID {
+		if byteVal, ok := val.([]byte); ok && len(byteVal) > 0 {
+			val, _ = uuid.ParseBytes(byteVal)
+		} else {
+			val = nil
+		}
+	}
+
 	if val == nil {
 		field.Set(reflect.New(field.Type()).Elem())
 		return nil

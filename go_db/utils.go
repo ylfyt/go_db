@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/google/uuid"
 )
 
 func camelToSnake(camel string) string {
@@ -50,6 +52,8 @@ func getTypeRef(val any) typeRef {
 		return type_FLOAT32
 	case float64:
 		return type_FLOAT64
+	case uuid.UUID:
+		return type_UUID
 	case map[string]any:
 		return type_MAP_STRING_ANY
 	case map[string]int:
@@ -104,6 +108,8 @@ func getColumnTypeMap(columns []*sql.ColumnType) []typeRef {
 			x = type_TIME
 		case "JSON", "JSONB":
 			x = type_JSON
+		case "UUID":
+			x = type_UUID
 		default:
 			x = type_UNKNOWN
 		}

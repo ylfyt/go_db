@@ -15,6 +15,7 @@ const (
 	type_JSON
 	type_BOOL
 	type_STRING
+	type_UUID
 	type_MAP_STRING_ANY
 	type_MAP_STRING_INT
 	type_MAP_STRING_STRING
