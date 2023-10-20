@@ -1,4 +1,4 @@
-package main
+package go_db
 
 import (
 	"encoding/json"
@@ -42,6 +42,19 @@ func setJsonToMap[T mapParseType](val any, field reflect.Value) error {
 	return nil
 }
 
+func parseDBValue(val any, columnType typeRef) any {
+	switch columnType {
+	case type_ARRAY_INT:
+		return parseArray[int](val, func(s string) int { newEl, _ := strconv.Atoi(s); return newEl })
+	case type_ARRAY_INT64:
+		return parseArray[int64](val, func(s string) int64 { newEl, _ := strconv.ParseInt(s, 10, 64); return newEl })
+	case type_ARRAY_STRING:
+		return parseArray[string](val, func(s string) string { return s })
+	default:
+		return val
+	}
+}
+
 func setValue(field reflect.Value, fieldType typeRef, val any, columnType typeRef) error {
 	if fieldType == type_UNKNOWN {
 		return fmt.Errorf("unknown type '%s'", field.Type())
@@ -58,6 +71,12 @@ func setValue(field reflect.Value, fieldType typeRef, val any, columnType typeRe
 	}
 	if columnType == type_ARRAY_INT64 {
 		val = parseArray[int64](val, func(s string) int64 { newEl, _ := strconv.ParseInt(s, 10, 64); return newEl })
+	}
+	if columnType == type_FLOAT64 {
+		if floatVal, ok := val.([]byte); ok {
+			newVal, _ := strconv.ParseFloat(string(floatVal), 64)
+			val = newVal
+		}
 	}
 	if fieldType == columnType {
 		field.Set(reflect.ValueOf(val))
@@ -108,5 +127,5 @@ func setValue(field reflect.Value, fieldType typeRef, val any, columnType typeRe
 		return fmt.Errorf("cannot convert db type 'time' to '%s'", fieldTypeName)
 	}
 
-	return nil
+	return fmt.Errorf("cannot convert db val to '%s'", fieldTypeName)
 }

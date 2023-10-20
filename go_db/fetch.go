@@ -1,4 +1,4 @@
-package main
+package go_db
 
 import (
 	"database/sql"
@@ -11,54 +11,16 @@ type queryable interface {
 	Exec(query string, args ...any) (sql.Result, error)
 }
 
-func fetch(conn queryable, out any, query string, args ...any) error {
-	outRef := reflect.TypeOf(out)
-	if outRef.Kind() != reflect.Pointer {
-		return fmt.Errorf("output must be pointer")
-	}
-	isSlice := outRef.Elem().Kind() == reflect.Slice
-
-	if isSlice {
-		if outRef.Elem().Elem().Kind() == reflect.Pointer {
-			if isPrimitiveType(outRef.Elem().Elem().Elem()) {
-				return fetchColumn(conn, !isSlice, out, query, args...)
-			}
-			return fetchWrapper(conn, !isSlice, out, query, args...)
-		}
-		if isPrimitiveType(outRef.Elem().Elem()) {
-			return fetchColumn(conn, !isSlice, out, query, args...)
-		}
-		return fetchWrapper(conn, !isSlice, out, query, args...)
-	}
-
-	if outRef.Elem().Kind() == reflect.Pointer {
-		if isPrimitiveType(outRef.Elem().Elem()) {
-			return fetchColumn(conn, !isSlice, out, query, args...)
-		}
-		return fetchWrapper(conn, !isSlice, out, query, args...)
-	}
-	if isPrimitiveType(outRef.Elem()) {
-		return fetchColumn(conn, !isSlice, out, query, args...)
-	}
-	return fetchWrapper(conn, !isSlice, out, query, args...)
-}
-
-func fetchWrapper(conn queryable, onlyOne bool, out any, query string, args ...any) error {
-	if onlyOne {
-		return fetchStruct(conn, out, query, args...)
-	}
-	return fetchSlice(conn, out, query, args...)
-}
-
-func fetchColumn(conn queryable, onlyOne bool, out any, query string, args ...any) error {
-	if onlyOne {
-		return fetchColumnOne(conn, out, query, args...)
-	}
-	return fetchColumns(conn, out, query, args...)
-}
-
 func fetchSlice(conn queryable, out any, query string, args ...any) error {
 	outType := reflect.TypeOf(out)
+	if outType.Kind() != reflect.Pointer {
+		return fmt.Errorf("output must be pointer")
+	}
+
+	if outType.Elem().Kind() != reflect.Slice {
+		return fmt.Errorf("output must slice")
+	}
+
 	isPointer := false
 	sliceType := outType.Elem()
 	var elemType reflect.Type
@@ -115,6 +77,9 @@ func fetchSlice(conn queryable, out any, query string, args ...any) error {
 
 func fetchStruct(conn queryable, out any, query string, args ...any) error {
 	outType := reflect.TypeOf(out)
+	if outType.Kind() != reflect.Pointer {
+		return fmt.Errorf("output must be pointer")
+	}
 
 	isPointer := false
 	var elemType reflect.Type
@@ -174,6 +139,14 @@ func fetchStruct(conn queryable, out any, query string, args ...any) error {
 
 func fetchColumns(conn queryable, out any, query string, args ...any) error {
 	outType := reflect.TypeOf(out)
+	if outType.Kind() != reflect.Pointer {
+		return fmt.Errorf("output must be pointer")
+	}
+
+	if outType.Elem().Kind() != reflect.Slice {
+		return fmt.Errorf("output must be slice")
+	}
+
 	isPointer := false
 	sliceType := outType.Elem()
 	var elemType reflect.Type
@@ -195,7 +168,7 @@ func fetchColumns(conn queryable, out any, query string, args ...any) error {
 		return err
 	}
 	defer rows.Close()
-	
+
 	columns, err := rows.ColumnTypes()
 	if err != nil {
 		return err
@@ -233,6 +206,9 @@ func fetchColumns(conn queryable, out any, query string, args ...any) error {
 
 func fetchColumnOne(conn queryable, out any, query string, args ...any) error {
 	outType := reflect.TypeOf(out)
+	if outType.Kind() != reflect.Pointer {
+		return fmt.Errorf("output must be pointer")
+	}
 
 	isPointer := false
 	var elemType reflect.Type
@@ -291,4 +267,41 @@ func fetchColumnOne(conn queryable, out any, query string, args ...any) error {
 	}
 
 	return nil
+}
+
+func fetchAsMap(conn queryable, query string, args ...any) ([]map[string]any, error) {
+	rows, err := conn.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	columns, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, err
+	}
+
+	scans := make([]any, len(columns))
+	scansPtr := make([]any, len(columns))
+	for i := range scans {
+		scansPtr[i] = &scans[i]
+	}
+
+	columnTypeMap := getColumnTypeMap(columns)
+
+	var result []map[string]any
+	for rows.Next() {
+		err := rows.Scan(scansPtr...)
+		if err != nil {
+			return nil, err
+		}
+		var newValue map[string]any = make(map[string]any)
+		for i := range columns {
+			val := parseDBValue(scans[i], columnTypeMap[i])
+			newValue[columns[i].Name()] = val
+		}
+		result = append(result, newValue)
+	}
+
+	return result, nil
 }

@@ -1,4 +1,4 @@
-package main
+package go_db
 
 import (
 	"bytes"
@@ -98,7 +98,7 @@ func getColumnTypeMap(columns []*sql.ColumnType) []typeRef {
 			x = type_INT64
 		case "FLOAT4":
 			x = type_FLOAT32
-		case "FLOAT8":
+		case "FLOAT8", "NUMERIC":
 			x = type_FLOAT64
 		case "DATE", "TIME", "TIMESTAMP", "TIMESTAMPTZ":
 			x = type_TIME
@@ -178,12 +178,17 @@ func rowScan(rows *sql.Rows, scansPtr []any, scans []any, elemType reflect.Type,
 }
 
 func isPrimitiveType(typ reflect.Type) bool {
+	if typ.String() == "time.Time" {
+		return true
+	}
 	switch typ.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
 		reflect.Float32, reflect.Float64,
-		reflect.String:
+		reflect.String, reflect.Bool:
 		return true
+	case reflect.Slice:
+		return isPrimitiveType(typ.Elem())
 	default:
 		return false
 	}

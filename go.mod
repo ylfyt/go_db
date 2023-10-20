@@ -1,4 +1,4 @@
-module go_db
+module github.com/ylfyt/go_db
 
 go 1.19
 

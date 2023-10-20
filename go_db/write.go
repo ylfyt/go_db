@@ -1,4 +1,4 @@
-package main
+package go_db
 
 func write(conn queryable, query string, args ...any) (int, error) {
 	res, err := conn.Exec(query, args...)
