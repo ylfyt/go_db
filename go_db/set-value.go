@@ -64,17 +64,16 @@ func setValue(field reflect.Value, fieldType typeRef, val any, columnType typeRe
 	if columnType == type_UNKNOWN {
 		return fmt.Errorf("unknown db type")
 	}
+	if val == nil {
+		field.Set(reflect.New(field.Type()).Elem())
+		return nil
+	}
 	if columnType == type_UUID {
 		if byteVal, ok := val.([]byte); ok && len(byteVal) > 0 {
 			val, _ = uuid.ParseBytes(byteVal)
 		} else {
 			val = nil
 		}
-	}
-
-	if val == nil {
-		field.Set(reflect.New(field.Type()).Elem())
-		return nil
 	}
 	if columnType == type_ARRAY_INT {
 		val = parseArray[int](val, func(s string) int { newEl, _ := strconv.Atoi(s); return newEl })
@@ -105,7 +104,7 @@ func setValue(field reflect.Value, fieldType typeRef, val any, columnType typeRe
 			return setJsonToMap[map[string]string](val, field)
 		}
 		if fieldType == type_ARRAY_MAP_STRING_ANY {
-			return setJsonToMap[[]map[string]string](val, field)
+			return setJsonToMap[[]map[string]any](val, field)
 		}
 		if fieldType == type_STRING {
 			tmpVal := string(val.([]byte))
