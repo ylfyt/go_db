@@ -4,11 +4,11 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/ylfyt/go_db/go_db"
+	"github.com/ylfyt/go_db"
 )
 
 func main() {
-	connStr := "postgresql://postgres:postgres@localhost/go_auth?sslmode=disable"
+	connStr := "postgresql://postgres:postgres@localhost/go_db?sslmode=disable"
 	db, err := go_db.New(connStr, go_db.Option{
 		MaxOpenConn: 100,
 	})
