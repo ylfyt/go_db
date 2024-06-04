@@ -26,7 +26,7 @@ func (me *TX) Get(out any, query string, args ...any) error {
 	return err
 }
 
-func (me *TX) FetchAsMap(query string, args ...any) ([]map[string]any, error) {
+func (me *TX) GetAsMap(query string, args ...any) ([]map[string]any, error) {
 	if me.isCommied {
 		return nil, fmt.Errorf("transaction already commited")
 	}
@@ -114,16 +114,4 @@ func (me *TX) Commit() error {
 	}
 	me.isCommied = true
 	return nil
-}
-
-func (me *DB) Begin() (*TX, error) {
-	tx, err := me.conn.Begin()
-	if err != nil {
-		return nil, err
-	}
-
-	return &TX{
-		conn:     tx,
-		hasError: false,
-	}, nil
 }

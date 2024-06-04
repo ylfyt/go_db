@@ -138,6 +138,9 @@ func getFieldIdxMap(columns []*sql.ColumnType, ref reflect.Type) []int {
 			continue
 		}
 		columnName := field.Tag.Get("col")
+		if columnName == "-" {
+			continue
+		}
 		if columnName == "" {
 			columnName = strings.Split(field.Tag.Get("json"), ",")[0]
 		}
