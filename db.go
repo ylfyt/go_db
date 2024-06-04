@@ -10,12 +10,14 @@ type Option struct {
 	MaxOpenConn     int
 	MaxIdleConn     int
 	MaxIdleLifeTime int // in seconds
+	Driver          string
 }
 
 const (
 	DEFAULT_MAX_OPEN_CONN      = 100
 	DEFAULT_MAX_IDLE_CONN      = 10
 	DEFAULT_MAX_CONN_LIFE_TIME = 300
+	DEFAULT_DRIVER             = "postgres"
 )
 
 func (me *DB) Get(out any, query string, args ...any) error {
