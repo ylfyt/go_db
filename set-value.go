@@ -6,8 +6,6 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-
-	"github.com/google/uuid"
 )
 
 type mapParseType interface {
@@ -58,6 +56,7 @@ func parseDBValue(val any, columnType typeRef) any {
 }
 
 func setValue(field reflect.Value, fieldType typeRef, val any, columnType typeRef) error {
+	// fmt.Println("VAL TYPE", reflect.TypeOf(val), field.Type(), fieldType, columnType)
 	if fieldType == type_UNKNOWN {
 		return fmt.Errorf("unknown type '%s'", field.Type())
 	}
@@ -68,31 +67,19 @@ func setValue(field reflect.Value, fieldType typeRef, val any, columnType typeRe
 		field.Set(reflect.New(field.Type()).Elem())
 		return nil
 	}
-	if columnType == type_UUID {
-		if byteVal, ok := val.([]byte); ok && len(byteVal) > 0 {
-			val, _ = uuid.ParseBytes(byteVal)
-		} else {
-			val = nil
-		}
+	// VALUE PARSING
+	newVal, err := parseDbValue(val, columnType)
+	if err != nil {
+		return err
 	}
-	if columnType == type_ARRAY_INT {
-		val = parseArray[int](val, func(s string) int { newEl, _ := strconv.Atoi(s); return newEl })
-	}
-	if columnType == type_ARRAY_INT64 {
-		val = parseArray[int64](val, func(s string) int64 { newEl, _ := strconv.ParseInt(s, 10, 64); return newEl })
-	}
-	if columnType == type_FLOAT64 {
-		if floatVal, ok := val.([]byte); ok {
-			newVal, _ := strconv.ParseFloat(string(floatVal), 64)
-			val = newVal
-		}
-	}
+	val = newVal
+
+	// END VALUE PARSING
 	if fieldType == columnType {
 		field.Set(reflect.ValueOf(val))
 		return nil
 	}
 
-	fieldTypeName := field.Type().Name()
 	if columnType == type_JSON {
 		if fieldType == type_MAP_STRING_ANY {
 			return setJsonToMap[map[string]any](val, field)
@@ -113,6 +100,8 @@ func setValue(field reflect.Value, fieldType typeRef, val any, columnType typeRe
 		}
 		return fmt.Errorf("cannot convert db type 'json' to '%s'", field.Type())
 	}
+
+	fieldTypeName := field.Type().Name()
 	if columnType == type_INT64 {
 		if fieldType == type_INT {
 			field.SetInt(val.(int64))

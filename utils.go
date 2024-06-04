@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -89,6 +90,7 @@ func getColumnTypeMap(columns []*sql.ColumnType) []typeRef {
 	refTypes := make([]typeRef, len(columns))
 	for i, v := range columns {
 		var x typeRef
+		// fmt.Println("DB TYPE:", v.DatabaseTypeName())
 		switch v.DatabaseTypeName() {
 		case "_INT4":
 			x = type_ARRAY_INT
@@ -98,13 +100,22 @@ func getColumnTypeMap(columns []*sql.ColumnType) []typeRef {
 			x = type_STRING
 		case "BOOL":
 			x = type_BOOL
-		case "INT4", "INT8":
+		case
+			"INT",
+			"INT4",
+			"INT8",
+			"BIGINT",
+			"UNSIGNED INT",
+			"UNSIGNED INT8",
+			"UNSIGNED BIGINT",
+			"UNSIGNED BIG INT",
+			"UNSIGNED BIG INT8":
 			x = type_INT64
 		case "FLOAT4":
 			x = type_FLOAT32
 		case "FLOAT8", "NUMERIC":
 			x = type_FLOAT64
-		case "DATE", "TIME", "TIMESTAMP", "TIMESTAMPTZ":
+		case "DATE", "TIME", "DATETIME", "TIMESTAMP", "TIMESTAMPTZ":
 			x = type_TIME
 		case "JSON", "JSONB":
 			x = type_JSON
@@ -198,4 +209,44 @@ func isPrimitiveType(typ reflect.Type) bool {
 	default:
 		return false
 	}
+}
+
+func parseDbValue(val any, columnType typeRef) (any, error) {
+	if columnType == type_UUID {
+		if strVal, ok := val.(string); ok && len(strVal) > 0 {
+			val, _ = uuid.Parse(strVal)
+		} else if byteVal, ok := val.([]byte); ok && len(byteVal) > 0 {
+			val, _ = uuid.ParseBytes(byteVal)
+		} else {
+			return nil, fmt.Errorf("cannot parse value for uuid column type (string or []byte only)")
+		}
+	}
+	if columnType == type_ARRAY_INT {
+		val = parseArray[int](val, func(s string) int { newEl, _ := strconv.Atoi(s); return newEl })
+	}
+	if columnType == type_ARRAY_INT64 {
+		val = parseArray[int64](val, func(s string) int64 { newEl, _ := strconv.ParseInt(s, 10, 64); return newEl })
+	}
+	if columnType == type_FLOAT64 {
+		if floatVal, ok := val.([]byte); ok {
+			newVal, _ := strconv.ParseFloat(string(floatVal), 64)
+			val = newVal
+		}
+	}
+	if columnType == type_BOOL {
+		if boolVal, ok := val.(bool); ok {
+			return boolVal, nil
+		}
+		if intVal, ok := val.(int64); ok {
+			return intVal > 0, nil
+		}
+		if intVal, ok := val.(int); ok {
+			return intVal > 0, nil
+		}
+		if intVal, ok := val.(int32); ok {
+			return intVal > 0, nil
+		}
+		return nil, fmt.Errorf("unsupported value for db type bool")
+	}
+	return val, nil
 }
