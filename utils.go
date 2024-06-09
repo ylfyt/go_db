@@ -130,29 +130,47 @@ func getColumnTypeMap(columns []*sql.ColumnType) []typeRef {
 	return refTypes
 }
 
-func getFieldIdxMap(columns []*sql.ColumnType, ref reflect.Type) []int {
+func parseFieldName(f reflect.StructField) string {
+	name := f.Tag.Get("col")
+	if name == "-" {
+		return ""
+	}
+	if name == "" {
+		name = strings.Split(f.Tag.Get("json"), ",")[0]
+	}
+	if name == "" || name == "-" {
+		name = camelToSnake(f.Name)
+	}
+	return name
+}
+
+func getFieldIdx(ref reflect.Type) map[string]int {
 	fields := map[string]int{}
 	for i := 0; i < ref.NumField(); i++ {
 		field := ref.Field(i)
 		if !field.IsExported() {
 			continue
 		}
-		columnName := field.Tag.Get("col")
-		if columnName == "-" {
-			continue
-		}
-		if columnName == "" {
-			columnName = strings.Split(field.Tag.Get("json"), ",")[0]
-		}
-		if columnName == "" || columnName == "-" {
-			columnName = camelToSnake(field.Name)
-		}
-		if columnName == "" {
-			continue
-		}
+		columnName := parseFieldName(field)
 		fields[columnName] = i
 	}
+	return fields
+}
 
+type JoinInfo struct {
+	Keys             []int
+	FieldIdxToColIdx []int
+	IsSlice          bool
+	IsPointer        bool
+	Type             reflect.Type
+	FieldTypeMap     []typeRef
+}
+
+func getFieldIdxMap(columns []*sql.ColumnType, ref reflect.Type) ([]int, map[int]JoinInfo) {
+	// fieldName -> fieldIdx
+	fields := getFieldIdx(ref)
+
+	// columnIdx -> fieldIdx
 	fieldMap := make([]int, len(columns))
 	for i, col := range columns {
 		idx, exist := fields[col.Name()]
@@ -163,7 +181,67 @@ func getFieldIdxMap(columns []*sql.ColumnType, ref reflect.Type) []int {
 		fieldMap[i] = idx
 	}
 
-	return fieldMap
+	nestedMap := make(map[int]JoinInfo)
+	for i := 0; i < ref.NumField(); i++ {
+		field := ref.Field(i)
+		if !field.IsExported() {
+			continue
+		}
+		keyData := field.Tag.Get("key")
+		if keyData == "" {
+			continue
+		}
+		fieldColTag := parseFieldName(field)
+		keys := strings.Split(keyData, ",")
+		var idxs []int
+		valid := true
+		for _, key := range keys {
+			columnIdx := findIdx(columns, func(i int) bool { return columns[i].Name() == key })
+			if columnIdx == -1 {
+				valid = false
+				break
+			}
+			idxs = append(idxs, columnIdx)
+		}
+		if !valid {
+			continue
+		}
+		isSlice := field.Type.Kind() == reflect.Slice
+		isPointer := field.Type.Kind() == reflect.Pointer
+		var ref reflect.Type
+		if isSlice || isPointer {
+			ref = field.Type.Elem()
+		} else {
+			ref = field.Type
+		}
+		if ref.Kind() != reflect.Struct {
+			fmt.Printf("warning: join key only can be applied to type struct, *struct, or []struct (field:%s)\n", field.Name)
+			continue
+		}
+		fieldIdxs := getFieldIdx(ref)
+		fieldIdxToColIdx := make([]int, len(fieldIdxs))
+		count := 0
+		for fieldTag, fieldIdx := range fieldIdxs {
+			columnIdx := findIdx(columns, func(i int) bool {
+				return columns[i].Name() == fieldColTag+"_"+fieldTag
+			})
+			fieldIdxToColIdx[fieldIdx] = columnIdx
+			if columnIdx != -1 {
+				count++
+			}
+		}
+		if count == 0 {
+			continue
+		}
+		nestedMap[i] = JoinInfo{
+			Keys:             idxs,
+			FieldIdxToColIdx: fieldIdxToColIdx,
+			IsSlice:          isSlice,
+			Type:             ref,
+			IsPointer:        isPointer,
+		}
+	}
+	return fieldMap, nestedMap
 }
 
 func parseRow(scans []any, fieldIdxMap []int, refValue reflect.Value, fieldTypeMap []typeRef, columnTypeMap []typeRef, columns []*sql.ColumnType) error {
@@ -183,19 +261,19 @@ func parseRow(scans []any, fieldIdxMap []int, refValue reflect.Value, fieldTypeM
 	return nil
 }
 
-func rowScan(rows *sql.Rows, scansPtr []any, scans []any, elemType reflect.Type, fieldIdxMap []int, fieldTypeMap []typeRef, columnTypeMap []typeRef, columns []*sql.ColumnType) (*reflect.Value, error) {
-	err := rows.Scan(scansPtr...)
-	if err != nil {
-		return nil, err
-	}
+// func rowScan(rows *sql.Rows, scansPtr []any, scans []any, elemType reflect.Type, fieldIdxMap []int, fieldTypeMap []typeRef, columnTypeMap []typeRef, columns []*sql.ColumnType) (*reflect.Value, error) {
+// 	err := rows.Scan(scansPtr...)
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	refVal := reflect.New(elemType)
-	err = parseRow(scans, fieldIdxMap, refVal, fieldTypeMap, columnTypeMap, columns)
-	if err != nil {
-		return nil, err
-	}
-	return &refVal, nil
-}
+// 	refVal := reflect.New(elemType)
+// 	err = parseRow(scans, fieldIdxMap, refVal, fieldTypeMap, columnTypeMap, columns)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	return &refVal, nil
+// }
 
 func isPrimitiveType(typ reflect.Type) bool {
 	if typ.String() == "time.Time" {
@@ -252,4 +330,14 @@ func parseDbValue(val any, columnType typeRef) (any, error) {
 		return nil, fmt.Errorf("unsupported value for db type bool")
 	}
 	return val, nil
+}
+
+func findIdx[T any](data []T, selector func(i int) bool) int {
+	for i := range data {
+		if selector(i) {
+			return i
+		}
+	}
+
+	return -1
 }
