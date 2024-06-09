@@ -61,14 +61,14 @@ func TestMain(m *testing.M) {
 }
 
 func TestJOIN(t *testing.T) {
-	var users []User
-	var products []Product
+	var users *User
+	var products Product
 
 	// TODO
 	// key -> data idx
 	// change columnIdx -> fieldIdx to fieldIdx -> columnIdx for nestedMap
 
-	// err := db.Get(&products, `
+	// err := db.GetFirst(&products, `
 	// 	SELECT
 	// 		p.id,
 	// 		p.name,
@@ -80,7 +80,7 @@ func TestJOIN(t *testing.T) {
 	// 		JOIN users u
 	// 			ON u.id == p.user_id
 	// `)
-	err := db.Get(&users, `
+	err := db.GetFirst(&users, `
 		SELECT 
 			u.id, 
 			u.name,
@@ -89,7 +89,8 @@ func TestJOIN(t *testing.T) {
 			u.id AS products_user_id
 		FROM 
 			users u JOIN products p 
-				ON u.id = p.user_id			
+				ON u.id = p.user_id
+		LIMIT 1			
 	`)
 	if err != nil {
 		t.Error(err)

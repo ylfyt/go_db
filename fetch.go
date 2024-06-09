@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"reflect"
-	"strings"
 )
 
 type queryable interface {
@@ -55,19 +54,19 @@ func fetchSlice(conn queryable, out any, query string, args ...any) error {
 		scansPtr[i] = &scans[i]
 	}
 
-	fieldIdxMap, nestedMap := getFieldIdxMap(columns, elemType)
+	fieldIdxMap, fieldJoinMap := getFieldIdxMap(columns, elemType)
 	fieldTypeMap := getFieldTypeMap(elemType)
 	columnTypeMap := getColumnTypeMap(columns)
 
-	for i := range nestedMap {
-		el := nestedMap[i]
-		el.FieldTypeMap = getFieldTypeMap(nestedMap[i].Type)
-		nestedMap[i] = el
+	for i := range fieldJoinMap {
+		el := fieldJoinMap[i]
+		el.FieldTypeMap = getFieldTypeMap(fieldJoinMap[i].Type)
+		fieldJoinMap[i] = el
 	}
 
+	newIdx := 0
 	var parentKeys map[string]int = make(map[string]int)
 	outValue := reflect.ValueOf(out).Elem()
-	count := 0
 	for rows.Next() {
 		err := rows.Scan(scansPtr...)
 		if err != nil {
@@ -79,25 +78,23 @@ func fetchSlice(conn queryable, out any, query string, args ...any) error {
 			return err
 		}
 		shouldInsert := true
-		for parentFieldIdx, join := range nestedMap {
+		for parentFieldIdx, join := range fieldJoinMap {
 			nestedNew := reflect.New(join.Type)
 			for fieldIdx, colIdx := range join.FieldIdxToColIdx {
 				if colIdx == -1 {
 					continue
 				}
 				field := nestedNew.Elem().Field(fieldIdx)
-				fieldType := join.FieldTypeMap[fieldIdx]
-				err := setValue(field, fieldType, scans[colIdx], columnTypeMap[colIdx])
+				err := setValue(field, join.FieldTypeMap[fieldIdx], scans[colIdx], columnTypeMap[colIdx])
 				if err != nil {
 					return fmt.Errorf("%s (col:%s)", err.Error(), columns[colIdx].Name())
 				}
 			}
 
-			keys := make([]string, len(join.Keys))
-			for i, colIdx := range join.Keys {
-				keys[i] = fmt.Sprint(scans[colIdx])
+			key := ""
+			for _, colIdx := range join.KeyColIdxs {
+				key += "_" + fmt.Sprint(scans[colIdx])
 			}
-			key := strings.Join(keys, "_")
 
 			elIdx, exist := parentKeys[key]
 			shouldInsert = !exist
@@ -119,13 +116,13 @@ func fetchSlice(conn queryable, out any, query string, args ...any) error {
 			} else {
 				refVal.Elem().Field(parentFieldIdx).Set(nestedNew.Elem())
 			}
-			parentKeys[key] = count
+			parentKeys[key] = newIdx
 		}
 
 		if !shouldInsert {
 			continue
 		}
-		count++
+		newIdx++
 		if isPointer {
 			newOut := reflect.Append(outValue, refVal)
 			outValue.Set(newOut)
@@ -147,16 +144,16 @@ func fetchStruct(conn queryable, out any, query string, args ...any) error {
 	var elemType reflect.Type
 	if outType.Elem().Kind() == reflect.Pointer {
 		if outType.Elem().Elem().Kind() != reflect.Struct {
-			return fmt.Errorf("out must be struct")
+			return fmt.Errorf("output must be struct")
 		}
 		elemType = outType.Elem().Elem()
 		isPointer = true
 	} else {
 		if outType.Elem().Kind() != reflect.Struct {
-			return fmt.Errorf("out must be struct")
+			return fmt.Errorf("output must be struct")
 		}
 		if reflect.ValueOf(out).IsNil() {
-			return fmt.Errorf("out cannot be nil")
+			return fmt.Errorf("output cannot be nil")
 		}
 		elemType = outType.Elem()
 	}
@@ -167,9 +164,6 @@ func fetchStruct(conn queryable, out any, query string, args ...any) error {
 	}
 	defer rows.Close()
 
-	if !rows.Next() {
-		return nil
-	}
 	columns, err := rows.ColumnTypes()
 	if err != nil {
 		return err
@@ -181,20 +175,83 @@ func fetchStruct(conn queryable, out any, query string, args ...any) error {
 		scansPtr[i] = &scans[i]
 	}
 
-	fieldIdxMap, _ := getFieldIdxMap(columns, elemType)
+	fieldIdxMap, fieldJoinMap := getFieldIdxMap(columns, elemType)
 	fieldTypeMap := getFieldTypeMap(elemType)
 	columnTypeMap := getColumnTypeMap(columns)
 
-	err = rows.Scan(scansPtr...)
-	if err != nil {
-		return err
-	}
-	refVal := reflect.New(elemType)
-	err = parseRow(scans, fieldIdxMap, refVal, fieldTypeMap, columnTypeMap, columns)
-	if err != nil {
-		return err
+	hasSlice := false
+	for i := range fieldJoinMap {
+		hasSlice = hasSlice || fieldJoinMap[i].IsSlice
+		el := fieldJoinMap[i]
+		el.FieldTypeMap = getFieldTypeMap(fieldJoinMap[i].Type)
+		fieldJoinMap[i] = el
 	}
 
+	isSet := false
+	joinSet := false
+	refVal := reflect.New(elemType)
+	parentFieldKeyMap := make(map[int]string)
+	for rows.Next() {
+		err = rows.Scan(scansPtr...)
+		if err != nil {
+			return err
+		}
+		if !isSet {
+			err = parseRow(scans, fieldIdxMap, refVal, fieldTypeMap, columnTypeMap, columns)
+			if err != nil {
+				return err
+			}
+			isSet = true
+		}
+		if !hasSlice && joinSet {
+			continue
+		}
+		for parentFieldIdx, join := range fieldJoinMap {
+			nestedNew := reflect.New(join.Type)
+			for fieldIdx, colIdx := range join.FieldIdxToColIdx {
+				if colIdx == -1 {
+					continue
+				}
+				field := nestedNew.Elem().Field(fieldIdx)
+				err := setValue(field, join.FieldTypeMap[fieldIdx], scans[colIdx], columnTypeMap[colIdx])
+				if err != nil {
+					return fmt.Errorf("%s (col:%s)", err.Error(), columns[colIdx].Name())
+				}
+			}
+
+			key := ""
+			for _, colIdx := range join.KeyColIdxs {
+				key += "_" + fmt.Sprint(scans[colIdx])
+			}
+			oldKey, exist := parentFieldKeyMap[parentFieldIdx]
+			if exist && key != oldKey {
+				continue
+			}
+
+			if exist {
+				if !join.IsSlice {
+					continue
+				}
+				newOut := reflect.Append(refVal.Elem().Field(parentFieldIdx), nestedNew.Elem())
+				refVal.Elem().Field(parentFieldIdx).Set(newOut)
+				continue
+			}
+			parentFieldKeyMap[parentFieldIdx] = key
+			if join.IsSlice {
+				newOut := reflect.Append(refVal.Elem().Field(parentFieldIdx), nestedNew.Elem())
+				refVal.Elem().Field(parentFieldIdx).Set(newOut)
+			} else if join.IsPointer {
+				refVal.Elem().Field(parentFieldIdx).Set(nestedNew)
+			} else {
+				refVal.Elem().Field(parentFieldIdx).Set(nestedNew.Elem())
+			}
+		}
+		joinSet = true
+	}
+
+	if !isSet {
+		return nil
+	}
 	outValue := reflect.ValueOf(out).Elem()
 	if isPointer {
 		outValue.Set(refVal)
