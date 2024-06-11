@@ -144,17 +144,24 @@ func parseFieldName(f reflect.StructField) string {
 	return name
 }
 
-func getFieldIdx(ref reflect.Type) map[string]int {
+func getFieldIdx(ref reflect.Type) (map[string]int, []string) {
 	fields := map[string]int{}
+	keys := make([]string, 0)
 	for i := 0; i < ref.NumField(); i++ {
 		field := ref.Field(i)
 		if !field.IsExported() {
 			continue
 		}
-		columnName := parseFieldName(field)
-		fields[columnName] = i
+		colName := parseFieldName(field)
+		if colName == "" {
+			continue
+		}
+		fields[colName] = i
+		if field.Tag.Get("key") != "" {
+			keys = append(keys, colName)
+		}
 	}
-	return fields
+	return fields, keys
 }
 
 type JoinInfo struct {
@@ -166,9 +173,22 @@ type JoinInfo struct {
 	FieldTypeMap     []typeRef
 }
 
-func getFieldIdxMap(columns []*sql.ColumnType, ref reflect.Type) ([]int, map[int]JoinInfo) {
+func getFieldIdxMap(columns []*sql.ColumnType, ref reflect.Type) ([]int, map[int]JoinInfo, []int) {
 	// fieldName -> fieldIdx
-	fields := getFieldIdx(ref)
+	fields, parentKeys := getFieldIdx(ref)
+	validKey := true
+	var parentKeyColIdx []int
+	for _, key := range parentKeys {
+		colIdx := findIdx(columns, func(i int) bool { return columns[i].Name() == key })
+		if colIdx == -1 {
+			validKey = false
+			break
+		}
+		parentKeyColIdx = append(parentKeyColIdx, colIdx)
+	}
+	if !validKey {
+		parentKeyColIdx = make([]int, 0)
+	}
 
 	// columnIdx -> fieldIdx
 	fieldMap := make([]int, len(columns))
@@ -184,26 +204,7 @@ func getFieldIdxMap(columns []*sql.ColumnType, ref reflect.Type) ([]int, map[int
 	fieldJoinMap := make(map[int]JoinInfo)
 	for i := 0; i < ref.NumField(); i++ {
 		field := ref.Field(i)
-		if !field.IsExported() {
-			continue
-		}
-		keyData := field.Tag.Get("key")
-		if keyData == "" {
-			continue
-		}
-		fieldColTag := parseFieldName(field)
-		keys := strings.Split(keyData, ",")
-		var keyColIdxs []int
-		validKey := true
-		for _, key := range keys {
-			columnIdx := findIdx(columns, func(i int) bool { return columns[i].Name() == key })
-			if columnIdx == -1 {
-				validKey = false
-				break
-			}
-			keyColIdxs = append(keyColIdxs, columnIdx)
-		}
-		if !validKey {
+		if !field.IsExported() || field.Tag.Get("join") == "" {
 			continue
 		}
 		isSlice := field.Type.Kind() == reflect.Slice
@@ -215,12 +216,27 @@ func getFieldIdxMap(columns []*sql.ColumnType, ref reflect.Type) ([]int, map[int
 			ref = field.Type
 		}
 		if ref.Kind() != reflect.Struct {
-			fmt.Printf("warning: join key only can be applied to type of struct, *struct, or []struct (field:%s)\n", field.Name)
+			fmt.Printf("warning: join only can be applied to type of struct, *struct, or []struct (field:%s)\n", field.Name)
 			continue
 		}
-		fieldIdxs := getFieldIdx(ref)
-		fieldIdxToColIdx := make([]int, len(fieldIdxs))
+		validKey := true
+		var keyColIdxs []int
+		fieldIdxs, keys := getFieldIdx(ref)
+		fieldColTag := parseFieldName(field)
+		for _, key := range keys {
+			colIdx := findIdx(columns, func(i int) bool { return columns[i].Name() == fieldColTag+"_"+key })
+			if colIdx == -1 {
+				validKey = false
+				break
+			}
+			keyColIdxs = append(keyColIdxs, colIdx)
+		}
+		if !validKey {
+			continue
+		}
+
 		validColumnIdx := 0
+		fieldIdxToColIdx := make([]int, len(fieldIdxs))
 		for fieldTag, fieldIdx := range fieldIdxs {
 			columnIdx := findIdx(columns, func(i int) bool {
 				return columns[i].Name() == fieldColTag+"_"+fieldTag
@@ -241,7 +257,7 @@ func getFieldIdxMap(columns []*sql.ColumnType, ref reflect.Type) ([]int, map[int
 			FieldIdxToColIdx: fieldIdxToColIdx,
 		}
 	}
-	return fieldMap, fieldJoinMap
+	return fieldMap, fieldJoinMap, parentKeyColIdx
 }
 
 func parseRow(scans []any, fieldIdxMap []int, refValue reflect.Value, fieldTypeMap []typeRef, columnTypeMap []typeRef, columns []*sql.ColumnType) error {

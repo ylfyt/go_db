@@ -13,16 +13,31 @@ import (
 var db *go_db.DB
 
 type User struct {
-	Id       int
+	Id       int `key:"1"`
 	Name     string
-	Products []Product `key:"id"`
+	Products []Product `join:"true"`
+	Store    *Store    `join:"true"`
+	Posts    []Post    `join:"true"`
 }
 
 type Product struct {
-	Id     int
+	Id     int `key:"1"`
 	Name   string
 	UserId int
-	User   *User `key:"id,user_id"`
+	User   *User
+}
+
+type Store struct {
+	Id     int `key:"1"`
+	UserId int
+	Name   string
+}
+
+type Post struct {
+	Id       int `key:"1"`
+	Title    string
+	AuthorId int
+	Author   *User
 }
 
 func createConn() error {
@@ -61,37 +76,45 @@ func TestMain(m *testing.M) {
 }
 
 func TestJOIN(t *testing.T) {
-	var users *User
-	var products Product
+	var users []User
+	var products []Product
 
 	// TODO
 	// key -> data idx
 	// change columnIdx -> fieldIdx to fieldIdx -> columnIdx for nestedMap
 
-	// err := db.GetFirst(&products, `
-	// 	SELECT
-	// 		p.id,
-	// 		p.name,
-	// 		p.user_id,
-	// 		u.id AS user_id,
-	// 		u.name AS user_name
-	// 	FROM
-	// 		products p
-	// 		JOIN users u
-	// 			ON u.id == p.user_id
-	// `)
-	err := db.GetFirst(&users, `
-		SELECT 
-			u.id, 
-			u.name,
-			p.id AS products_id, 
-			p.name AS products_name,
-			u.id AS products_user_id
-		FROM 
-			users u JOIN products p 
-				ON u.id = p.user_id
-		LIMIT 1			
+	err := db.Get(&products, `
+		SELECT
+			p.id,
+			p.name,
+			p.user_id,
+			u.id AS user_id,
+			u.name AS user_name
+		FROM
+			products p
+			JOIN users u
+				ON u.id == p.user_id
 	`)
+	// err := db.Get(&users, `
+	// 	SELECT
+	// 		u.id,
+	// 		u.name,
+	// 		p.id AS products_id,
+	// 		p.name AS products_name,
+	// 		p.user_id AS products_user_id,
+	// 		s.id AS store_id,
+	// 		s.name AS store_name,
+	// 		s.user_id AS store_user_id,
+	// 		po.id AS posts_id,
+	// 		po.title AS posts_title,
+	// 		po.author_id AS posts_author_id
+	// 	FROM
+	// 		users u
+	// 		JOIN products p ON u.id = p.user_id
+	// 		JOIN store s ON u.id = s.user_id
+	// 		JOIN posts po ON u.id = po.author_id
+	// 	WHERE u.id = 2
+	// `)
 	if err != nil {
 		t.Error(err)
 		return

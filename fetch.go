@@ -54,9 +54,9 @@ func fetchSlice(conn queryable, out any, query string, args ...any) error {
 		scansPtr[i] = &scans[i]
 	}
 
-	fieldIdxMap, fieldJoinMap := getFieldIdxMap(columns, elemType)
 	fieldTypeMap := getFieldTypeMap(elemType)
 	columnTypeMap := getColumnTypeMap(columns)
+	fieldIdxMap, fieldJoinMap, parentKeys := getFieldIdxMap(columns, elemType)
 
 	for i := range fieldJoinMap {
 		el := fieldJoinMap[i]
@@ -65,7 +65,8 @@ func fetchSlice(conn queryable, out any, query string, args ...any) error {
 	}
 
 	newIdx := 0
-	var parentKeys map[string]int = make(map[string]int)
+	nestedKeyToIdx := make(map[string]bool)
+	var parentKeyToIdx map[string]int = make(map[string]int)
 	outValue := reflect.ValueOf(out).Elem()
 	for rows.Next() {
 		err := rows.Scan(scansPtr...)
@@ -78,47 +79,63 @@ func fetchSlice(conn queryable, out any, query string, args ...any) error {
 			return err
 		}
 		shouldInsert := true
-		for parentFieldIdx, join := range fieldJoinMap {
-			nestedNew := reflect.New(join.Type)
-			for fieldIdx, colIdx := range join.FieldIdxToColIdx {
-				if colIdx == -1 {
+		if len(parentKeys) > 0 {
+			parentKey := ""
+			for _, colIdx := range parentKeys {
+				parentKey += "_" + fmt.Sprint(scans[colIdx])
+			}
+			parentIdx, parentExist := parentKeyToIdx[parentKey]
+			shouldInsert = !parentExist
+
+			for parentFieldIdx, join := range fieldJoinMap {
+				nestedNew := reflect.New(join.Type)
+				for fieldIdx, colIdx := range join.FieldIdxToColIdx {
+					if colIdx == -1 {
+						continue
+					}
+					field := nestedNew.Elem().Field(fieldIdx)
+					err := setValue(field, join.FieldTypeMap[fieldIdx], scans[colIdx], columnTypeMap[colIdx])
+					if err != nil {
+						return fmt.Errorf("%s (col:%s)", err.Error(), columns[colIdx].Name())
+					}
+				}
+
+				if parentExist {
+					if !join.IsSlice {
+						continue
+					}
+					key := fmt.Sprint(parentIdx) + "_" + fmt.Sprint(parentFieldIdx) + "_"
+					for _, colIdx := range join.KeyColIdxs {
+						key += fmt.Sprint(scans[colIdx]) + "_"
+					}
+					if nestedKeyToIdx[key] {
+						continue
+					}
+					nestedKeyToIdx[key] = true
+					el := outValue.Index(parentIdx)
+					newEl := reflect.Append(el.Field(parentFieldIdx), nestedNew.Elem())
+					el.Field(parentFieldIdx).Set(newEl)
 					continue
 				}
-				field := nestedNew.Elem().Field(fieldIdx)
-				err := setValue(field, join.FieldTypeMap[fieldIdx], scans[colIdx], columnTypeMap[colIdx])
-				if err != nil {
-					return fmt.Errorf("%s (col:%s)", err.Error(), columns[colIdx].Name())
+
+				if join.IsSlice {
+					key := fmt.Sprint(newIdx) + "_" + fmt.Sprint(parentFieldIdx) + "_"
+					for _, colIdx := range join.KeyColIdxs {
+						key += fmt.Sprint(scans[colIdx]) + "_"
+					}
+					nestedKeyToIdx[key] = true
+					newOut := reflect.Append(refVal.Elem().Field(parentFieldIdx), nestedNew.Elem())
+					refVal.Elem().Field(parentFieldIdx).Set(newOut)
+				} else if join.IsPointer {
+					refVal.Elem().Field(parentFieldIdx).Set(nestedNew)
+				} else {
+					refVal.Elem().Field(parentFieldIdx).Set(nestedNew.Elem())
 				}
 			}
-
-			key := ""
-			for _, colIdx := range join.KeyColIdxs {
-				key += "_" + fmt.Sprint(scans[colIdx])
+			if shouldInsert {
+				parentKeyToIdx[parentKey] = newIdx
 			}
-
-			elIdx, exist := parentKeys[key]
-			shouldInsert = !exist
-			if exist {
-				if !join.IsSlice {
-					continue
-				}
-				el := outValue.Index(elIdx)
-				newEl := reflect.Append(el.Field(parentFieldIdx), nestedNew.Elem())
-				el.Field(parentFieldIdx).Set(newEl)
-				continue
-			}
-
-			if join.IsSlice {
-				newOut := reflect.Append(refVal.Elem().Field(parentFieldIdx), nestedNew.Elem())
-				refVal.Elem().Field(parentFieldIdx).Set(newOut)
-			} else if join.IsPointer {
-				refVal.Elem().Field(parentFieldIdx).Set(nestedNew)
-			} else {
-				refVal.Elem().Field(parentFieldIdx).Set(nestedNew.Elem())
-			}
-			parentKeys[key] = newIdx
 		}
-
 		if !shouldInsert {
 			continue
 		}
@@ -175,7 +192,7 @@ func fetchStruct(conn queryable, out any, query string, args ...any) error {
 		scansPtr[i] = &scans[i]
 	}
 
-	fieldIdxMap, fieldJoinMap := getFieldIdxMap(columns, elemType)
+	fieldIdxMap, fieldJoinMap, _ := getFieldIdxMap(columns, elemType)
 	fieldTypeMap := getFieldTypeMap(elemType)
 	columnTypeMap := getColumnTypeMap(columns)
 
